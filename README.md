@@ -22,7 +22,6 @@ clients after which all data is transfered directly from the IC to clients.
 * cp `http_request.ts` `agent-js/apps/sw-cert/src/sw/http_request.ts`
 * change the `CANISTER_ID` in overwritten `http_request.ts`
 
-
 ### a setup target is provided in the makefile
 'make setup'
 
