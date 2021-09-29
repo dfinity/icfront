@@ -25,7 +25,7 @@ clients after which all data is transfered directly from the IC to clients.
 ### A setup target is provided in the makefile
 'make setup'
 
-### Build the service worker
+## Build the service worker
 'make build'
 
 ## Deploy to firebase hosting
