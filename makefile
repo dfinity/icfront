@@ -4,7 +4,7 @@ build:
 	rm -f public/*
 	cp agent-js/apps/sw-cert/dist/* public
 
-install:
+setup:
 	git clone https://github.com/dfinity/agent-js
 	cp http_request.ts agent-js/apps/sw-cert/src/sw/http_request.ts
 	echo "update CANSTER_ID in agent-js/apps/sw-cert/src/sw/http_request.ts"
