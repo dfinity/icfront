@@ -14,7 +14,7 @@ clients after which all data is transfered directly from the IC to clients.
 * firebase login
 
 ## Prepare front end javascript code to talk directly to the Internet Computer blockchain
-* use `createActor(canisterId, { agentActions: { host: "https://ic0.app" }` in your front end to hardcode the production backennd when creating agents
+* use `createActor(canisterId, { agentOptions: { host: "https://ic0.app" }` in your front end to hardcode the production backennd when creating agents
 
 ## Setup the service worker
 * git clone https://github.com/dfinity/agent-js.git
