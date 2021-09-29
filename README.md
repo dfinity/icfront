@@ -1,4 +1,4 @@
-# Secure custom domains for applications on the IC using firebase hosting.
+# Secure custom domains for smart contracts on the Internet Computer using firebase hosting.
 
 Firebase (Google) provides free hosting and TLS certificates for static sites.
 This project builds a custom service worker which provides end-to-end security
