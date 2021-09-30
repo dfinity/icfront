@@ -1,12 +1,14 @@
 # Secure custom domains for smart contracts on the Internet Computer using firebase hosting.
 
 Firebase (Google) provides free hosting and TLS certificates for static sites.
-This project builds a custom service worker which provides end-to-end security
-for a canister smart contract on the Internet computer blockchain.
+This project builds a custom service worker which enables a custom domain with
+end-to-end security for a canister smart contract on the Internet computer blockchain.
 
 Firebase has a free "Spark Plan" which provides a moderate amount of
-storage and bandwidth, sufficient for loading the service worker into many
-clients after which all data is transfered directly from the IC to clients.
+storage and bandwidth, sufficient for loading this service worker which then proxies
+custom domain requests to the IC and verifies the integrity of responses.
+After the service worker is loaded, all data is transfered directly between
+the client and the IC.
 
 ## Prepare the environment
 * install npm
