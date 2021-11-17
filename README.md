@@ -1,6 +1,6 @@
 # Secure custom domains for smart contracts on the Internet Computer using static hosting.
 
-All smart contracts, including Web3 dapps on the Internet Computer blockchain are secured by
+All smart contracts, including Web3 dapps, on the Internet Computer blockchain are secured by
 the root key.  End-to-end security is provided by a service-worker, a proxy embedded in
 the browser, which verifies the integrity of data downloaded from the Internet Computer blockchain.
 
@@ -49,4 +49,3 @@ the client and the Internet Computer blockchain.
 
   This will require telling firebase about your domain and pointing your DNS to firebase.
   Firebase will automatically generate a TLS certificate.
-
