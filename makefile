@@ -5,7 +5,8 @@ build:
 	firebase deploy
 
 setup:
-	install npm
+	echo install npm
+	(cd service-worker; npm install)
 	npm install -g firebase-tools
 	firebase login
 	echo "update CANSTER_ID and MY_DOMAIN in agent-js/apps/sw-cert/src/sw/http_request.ts"
