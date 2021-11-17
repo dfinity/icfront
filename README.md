@@ -6,6 +6,9 @@ the browser, which verifies the integrity of data downloaded from the Internet C
 
 This project builds a custom service worker which enables a custom domain with
 end-to-end security for a specific canister smart contract on the Internet computer blockchain.
+The service worker can be served as static assets from any internet connected device and after
+the service worker is loaded, all data is transfered directly between the client and the
+Internet Computer blockchain.
 
 Ultimately security of any site using standard web technology depends on DNS since control of DNS allows
 the site to be redirected and enables control of TLS certificates.  Consequently for a standard web site
@@ -13,11 +16,12 @@ trust must be placed at least in the DNS registrar.  If the registrar provides s
 of a custom service worker can provided end-to-end security for standard Web3 dapps on the Internet Computer
 blockchain without increasing the number of entities that must be trusted.
 
+Any static hosting solution will work, and additional examples will be forthcoming and are welcome.
+For now this example uses Google.
+
 Google provides domains and Firebase (Google) provides free hosting and TLS certificates for static sites.
 Firebase has a free "Spark Plan" which provides a moderate amount of
 storage and bandwidth, sufficient for loading the custom service worker.
-After the service worker is loaded, all data is transfered directly between
-the client and the Internet Computer blockchain.
 
 ## Prepare the environment
 * install npm
