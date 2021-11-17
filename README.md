@@ -19,16 +19,15 @@ the client and the IC.
 * use `createActor(canisterId, { agentOptions: { host: "https://ic0.app" }` in your front end to hardcode the production backennd when creating agents
 
 ## Setup the service worker
-* git clone https://github.com/dfinity/agent-js.git
-  Into this directory.
-* cp `http_request.ts` `agent-js/apps/sw-cert/src/sw/http_request.ts`
-* change the `CANISTER_ID` in overwritten `http_request.ts`
+* change the `CANISTER_ID` and `MY_DOMAIN` in `service-worker/src/sw/http_request.ts`
+* build the service worker 'cd service-worker;npm run build'
+* copy from service-worker/dist to public
 
 ### A setup target is provided in the makefile
-'make setup'
+* `make setup`
 
 ## Build the service worker
-'make build'
+* `make build`
 
 ## Deploy to firebase hosting
 * `firebase init`

@@ -1,13 +1,12 @@
 build:
-	rm -f agent-js/apps/sw-cert/dist/*
-	(cd agent-js; npm run build --workspaces --if-present)
+	(cd service-worker; npm run build)
 	rm -f public/*
-	cp agent-js/apps/sw-cert/dist/* public
+	cp service-worker/dist/* public
+	firebase deploy
 
 setup:
-	git clone https://github.com/dfinity/agent-js
-	cp http_request.ts agent-js/apps/sw-cert/src/sw/http_request.ts
-	echo "update CANSTER_ID in agent-js/apps/sw-cert/src/sw/http_request.ts"
+	echo "update CANSTER_ID and MY_DOMAIN in agent-js/apps/sw-cert/src/sw/http_request.ts"
 	read
-	$EDITOR agent-js/apps/sw-cert/src/sw/http_request.ts
+	$EDITOR service-worker/src/sw/http_request.ts
 	mkdir public
+	firebase init
