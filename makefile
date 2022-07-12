@@ -1,7 +1,8 @@
 build:
 	(cd service-worker; npm run build)
+	-mkdir public
 	rm -f public/*
-	cp service-worker/dist/* public
+	cp service-worker/dist-prod/* public
 	firebase deploy
 
 setup:

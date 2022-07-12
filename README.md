@@ -32,7 +32,7 @@ storage and bandwidth, sufficient for loading the custom service worker.
 * use `createActor(canisterId, { agentOptions: { host: "https://ic0.app" }` in your front end to hardcode the production backennd when creating agents
 
 ## Setup the service worker
-* change the `CANISTER_ID` and `MY_DOMAIN` in `service-worker/src/sw/http_request.ts`
+* in service-worker/src/sw/http\_request.ts replace YOUR\_DOMAIN with your domain and YOUR\_CANISTER_ID with your canister id
 * build the service worker 'cd service-worker;npm run build'
 * copy from service-worker/dist to public
 
