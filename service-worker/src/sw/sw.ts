@@ -1,3 +1,5 @@
+import { ServiceWorkerEvents } from '../typings';
+import { CanisterResolver } from './domains';
 import { handleRequest } from './http_request';
 
 declare const self: ServiceWorkerGlobalScope;
@@ -5,20 +7,17 @@ declare const self: ServiceWorkerGlobalScope;
 const DEBUG = true;
 
 // Always install updated SW immediately
-self.addEventListener('install', () => {
-  self.skipWaiting();
+self.addEventListener('install', (event) => {
+  event.waitUntil(self.skipWaiting());
 });
 
-self.addEventListener('activate', async () => {
+self.addEventListener('activate', (event) => {
   // upon activation take control of all clients (tabs & windows)
-  await self.clients.claim();
-  // reload all clients
-  const clients = (await self.clients.matchAll()) as WindowClient[];
-  clients.forEach((client) => client.navigate(client.url));
+  event.waitUntil(self.clients.claim());
 });
 
 // Intercept and proxy all fetch requests made by the browser or DOM on this scope.
-self.addEventListener('fetch', (event: FetchEvent) => {
+self.addEventListener('fetch', (event) => {
   try {
     const response = handleRequest(event.request);
     event.respondWith(response);
@@ -33,5 +32,17 @@ self.addEventListener('fetch', (event: FetchEvent) => {
       );
     }
     event.respondWith(new Response('Internal Error', { status: 502 }));
+  }
+});
+
+// handle events from the client messages
+self.addEventListener('message', async (event) => {
+  const body = event.data;
+  switch (body?.action) {
+    case ServiceWorkerEvents.SaveICHostInfo: {
+      const resolver = await CanisterResolver.setup();
+      await resolver.saveICHostInfo(body.data);
+      break;
+    }
   }
 });
