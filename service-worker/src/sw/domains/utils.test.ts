@@ -1,5 +1,6 @@
 import { Principal } from '@dfinity/principal';
 import {
+  isRawDomain,
   maybeResolveCanisterFromHeaders,
   maybeResolveCanisterFromHostName,
   resolveCanisterFromUrl,
@@ -14,9 +15,7 @@ describe('Resolve canister from headers', () => {
 
     const resolve = maybeResolveCanisterFromHeaders(headers);
 
-    expect(resolve).not.toBeNull();
-    expect(resolve?.gateway.hostname).toEqual('ic0.app');
-    expect(resolve?.principal).toEqual(Principal.fromText(canisterId));
+    expect(resolve).toEqual(Principal.fromText(canisterId));
   });
 
   it('should resolve removing host port', async () => {
@@ -26,9 +25,7 @@ describe('Resolve canister from headers', () => {
 
     const resolve = maybeResolveCanisterFromHeaders(headers);
 
-    expect(resolve).not.toBeNull();
-    expect(resolve?.gateway.hostname).toEqual('ic0.app');
-    expect(resolve?.principal).toEqual(Principal.fromText(canisterId));
+    expect(resolve).toEqual(Principal.fromText(canisterId));
   });
 
   it('should return null when no canister id is found', async () => {
@@ -41,6 +38,42 @@ describe('Resolve canister from headers', () => {
   });
 });
 
+describe('Match raw url', () => {
+  it('should match raw url', async () => {
+    expect(isRawDomain('example.raw.ic0.app', true)).toBeTruthy();
+    expect(isRawDomain('example.raw.ic1.app', true)).toBeTruthy();
+    expect(isRawDomain('example.raw.testic0.app', true)).toBeTruthy();
+    expect(isRawDomain('example.raw.testic1.app', true)).toBeTruthy();
+    expect(isRawDomain('example.raw.icp0.io', true)).toBeTruthy();
+    expect(
+      isRawDomain('example.raw.some.testnet.ic1.network', false)
+    ).toBeTruthy();
+    expect(
+      isRawDomain('example.raw.another-1.testnet.ic1.network', false)
+    ).toBeTruthy();
+    expect(
+      isRawDomain('example.raw.another_1.testnet.ic1.network', false)
+    ).toBeTruthy();
+    expect(isRawDomain('example.raw.ic0.dev', false)).toBeTruthy();
+  });
+
+  it('should not match raw url', async () => {
+    expect(isRawDomain('example.raw.ic0.io', true)).toBeFalsy();
+    expect(isRawDomain('raw.example.ic0.app', true)).toBeFalsy();
+    expect(isRawDomain('raw.example.ic0.dev', true)).toBeFalsy();
+    expect(isRawDomain('raw.example.testic0.app', true)).toBeFalsy();
+    expect(isRawDomain('raw.internetcomputer.org', true)).toBeFalsy();
+    expect(isRawDomain('raw.example.icp0.io', true)).toBeFalsy();
+    expect(isRawDomain('example.raw.icp0.app', true)).toBeFalsy();
+    expect(isRawDomain('example.raw.icp0.dev', true)).toBeFalsy();
+    expect(
+      isRawDomain('raw.example.some.testnet.ic1.network', false)
+    ).toBeFalsy();
+    expect(isRawDomain('example.raw.some.testnet.network', false)).toBeFalsy();
+    expect(isRawDomain('example.raw.some.testic0.app', false)).toBeFalsy();
+  });
+});
+
 describe('Resolve canister from url', () => {
   it('should resolve from url with canister id', async () => {
     const canisterId = 'g3wsl-eqaaa-aaaan-aaaaa-cai';
@@ -48,20 +81,7 @@ describe('Resolve canister from url', () => {
 
     const resolve = resolveCanisterFromUrl(url);
 
-    expect(resolve).not.toBeNull();
-    expect(resolve?.gateway.hostname).toEqual('ic0.app');
-    expect(resolve?.principal).toEqual(Principal.fromText(canisterId));
-  });
-
-  it('should resolve from url with canister id in the search params', async () => {
-    const canisterId = 'g3wsl-eqaaa-aaaan-aaaaa-cai';
-    const url = new URL(`https://ic0.app?canisterId=${canisterId}`);
-
-    const resolve = resolveCanisterFromUrl(url);
-
-    expect(resolve).not.toBeNull();
-    expect(resolve?.gateway.hostname).toEqual('ic0.app');
-    expect(resolve?.principal).toEqual(Principal.fromText(canisterId));
+    expect(resolve).toEqual(Principal.fromText(canisterId));
   });
 
   it('should return null when no canister id is found', async () => {
@@ -87,8 +107,7 @@ describe('Resolve canister from hostname', () => {
     const resolve = maybeResolveCanisterFromHostName(url.hostname);
 
     expect(resolve).not.toBeNull();
-    expect(resolve?.gateway.hostname).toEqual('icgateway.io');
-    expect(resolve?.principal).toEqual(Principal.fromText(canisterId));
+    expect(resolve).toEqual(Principal.fromText(canisterId));
   });
 
   it('should handle raw.ic0 as a web2 resource', async () => {

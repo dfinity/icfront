@@ -1,14 +1,20 @@
-import { ServiceWorkerEvents } from '../typings';
+import { AgentHTTPResponseError } from '@dfinity/agent/lib/cjs/agent/http/errors';
+import { ServiceWorkerEvents, ServiceWorkerMessages } from '../typings';
 import { CanisterResolver } from './domains';
-import { handleRequest } from './http_request';
+import { RequestProcessor } from './requests';
+import {
+  getBoundaryNodeRequestId,
+  loadResponseVerification,
+  reloadServiceWorkerClients,
+  uninstallServiceWorker,
+} from './requests/utils';
+import { handleErrorResponse } from './views/error';
 
 declare const self: ServiceWorkerGlobalScope;
 
-const DEBUG = true;
-
 // Always install updated SW immediately
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(loadResponseVerification().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -18,30 +24,56 @@ self.addEventListener('activate', (event) => {
 
 // Intercept and proxy all fetch requests made by the browser or DOM on this scope.
 self.addEventListener('fetch', (event) => {
-  try {
-    const response = handleRequest(event.request);
-    event.respondWith(response);
-  } catch (e) {
-    const error_message = String(e);
-    console.error(error_message);
-    if (DEBUG) {
-      return event.respondWith(
-        new Response(error_message, {
-          status: 501,
-        })
-      );
-    }
-    event.respondWith(new Response('Internal Error', { status: 502 }));
-  }
+  event.respondWith(
+    (async () => {
+      const isNavigation = event.request.mode === 'navigate';
+      const request = new RequestProcessor(event.request);
+
+      try {
+        const response = await request.perform();
+
+        if (response.status >= 400) {
+          return handleErrorResponse({
+            isNavigation,
+            requestId: request.requestId,
+            error: response.statusText ?? (await response.text()),
+            request: event.request,
+            response,
+          });
+        }
+
+        return response;
+      } catch (error) {
+        let requestId = request.requestId;
+        if (error instanceof AgentHTTPResponseError) {
+          requestId = getBoundaryNodeRequestId(error.response);
+        }
+
+        return await handleErrorResponse({
+          isNavigation,
+          requestId,
+          error,
+          request: event.request,
+        });
+      }
+    })()
+  );
 });
 
 // handle events from the client messages
 self.addEventListener('message', async (event) => {
-  const body = event.data;
+  const body = event.data as ServiceWorkerMessages;
   switch (body?.action) {
     case ServiceWorkerEvents.SaveICHostInfo: {
       const resolver = await CanisterResolver.setup();
       await resolver.saveICHostInfo(body.data);
+      break;
+    }
+    case ServiceWorkerEvents.ResetServiceWorker: {
+      await uninstallServiceWorker();
+      if (body.data.reloadFromWorker) {
+        await reloadServiceWorkerClients();
+      }
       break;
     }
   }

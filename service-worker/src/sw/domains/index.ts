@@ -1,20 +1,20 @@
+import { Principal } from '@dfinity/principal';
 import { ICHostInfoEvent } from '../../typings';
+import { isMainNet } from '../requests/utils';
+import logger from '../../logger';
 import { Storage } from '../storage';
-import {
-  CurrentGatewayResolveError,
-  MalformedCanisterError,
-  MalformedHostnameError,
-} from './errors';
+import { MalformedCanisterError } from './errors';
 import { ResolverMapper } from './mapper';
-import { hostnameCanisterIdMap } from './static';
+import { DEFAULT_GATEWAY, hostnameCanisterIdMap } from './static';
 import {
   DBHostsItem,
-  DomainLookup,
   DomainsStorageDBSchema,
+  acceptedLookupUrlProtocols,
   domainLookupHeaders,
   domainStorageProperties,
 } from './typings';
 import {
+  apiGateways,
   isRawDomain,
   maybeResolveCanisterFromHeaders,
   resolveCanisterFromUrl,
@@ -26,7 +26,7 @@ export class CanisterResolver {
   private constructor(
     private readonly storage: Storage<DomainsStorageDBSchema>,
     private readonly ttl = 60 * 60 * 1000, // 60 minutes
-    private readonly inflight = new Map<string, Promise<DomainLookup>>()
+    private readonly inflight = new Map<string, Promise<Principal | null>>()
   ) {}
 
   static async setup(): Promise<CanisterResolver> {
@@ -55,70 +55,103 @@ export class CanisterResolver {
   async saveICHostInfo(event: ICHostInfoEvent): Promise<void> {
     const item = ResolverMapper.toDBHostsItemFromEvent(event);
     if (item && item.canister) {
-      await this.storage.put(event.hostname, item, {
+      await this.storage.put(self.location.origin, item, {
         ttl: new Date(Date.now() + this.ttl),
       });
     }
   }
 
-  async getCurrentGateway(): Promise<URL> {
-    const lookup = await this.lookup(new URL(self.location.href), false);
-
-    if (!lookup.canister) {
-      throw new CurrentGatewayResolveError();
-    }
-
-    return lookup.canister.gateway;
+  /**
+   * Gets the current gateway. On mainnet this is always `DEFAULT_GATEWAY`,
+   * on testnets this is based on the current URL, see `getRootDomain` for more information.
+   * @returns The current gateway.
+   */
+  async getCurrentGateway(mainNet = isMainNet): Promise<URL> {
+    return mainNet ? DEFAULT_GATEWAY : this.getRootDomain();
   }
 
-  resolveLookupFromUrl(domain: URL): DomainLookup | null {
+  /**
+   * Gets the root domain that is currently hosting the service worker,
+   * this will be used as the gateway when running on a testnet,
+   * or used to determine if a dApp is making requests against itself or another domain.
+   *
+   * This is based on the current URL and assumes the following format:
+   * `${self.location.protocol}//${canisterId}.${gatewayHostname}/${path}`,
+   * and will return the following:
+   * `${self.location.protocol}//${gatewayHostname}`.
+   * If no canister ID is found in the hostname, the full hostname will be returned.
+   *
+   * For example:
+   * `https://rwlgt-iiaaa-aaaaa-aaaaa-cai.small04.testnet.dfinity.network/some-path/`,
+   * will return:
+   * `https://small04.testnet.dfinity.network/`.
+   *
+   * @returns The gateway for the testnet hosting the service worker.
+   */
+  public getRootDomain(): URL {
+    const hostnameParts = self.location.hostname.split('.').reverse();
+    const rootDomainParts: string[] = [];
+
+    for (const part of hostnameParts) {
+      try {
+        // we don't need the canister ID at this point,
+        // but if we have found a canister ID then we know that we've found the full root domain,
+        // so we return it
+        Principal.fromText(part);
+        return new URL(
+          `${self.location.protocol}//${rootDomainParts.reverse().join('.')}`
+        );
+      } catch (_) {
+        // domain part is not a canister ID,
+        // so we can assume it is part of the root domain
+        rootDomainParts.push(part);
+      }
+    }
+
+    // this part of the code will be reached if we never find a canister ID in the domain
+    // this will happen if we are on a custom domain and it should return the full hostname
+    return new URL(`${self.location.protocol}//${self.location.hostname}`);
+  }
+
+  resolveLookupFromUrl(domain: URL): Principal | null {
     // maybe resolve from hardcoded mappings to avoid uncessary network round trips
-    if (hostnameCanisterIdMap.has(domain.hostname)) {
-      return hostnameCanisterIdMap.get(domain.hostname);
+    const staticMapping = hostnameCanisterIdMap.get(domain.hostname);
+    if (staticMapping) {
+      return staticMapping;
     }
 
     // handle raw domain as a web2 request
     if (isRawDomain(domain.hostname)) {
-      return { canister: false };
+      return null;
     }
 
     // maybe resolve the canister id from url
-    const canister = resolveCanisterFromUrl(domain);
-    if (canister) {
-      return {
-        canister: {
-          gateway: canister.gateway,
-          principal: canister.principal,
-        },
-      };
-    }
-
-    return null;
+    return resolveCanisterFromUrl(domain);
   }
 
-  async lookupFromHttpRequest(request: Request): Promise<DomainLookup> {
+  async lookupFromHttpRequest(request: Request): Promise<Principal | null> {
+    const url = new URL(request.url);
+
+    if (!acceptedLookupUrlProtocols.has(url.protocol)) {
+      return null;
+    }
+
     const canister = maybeResolveCanisterFromHeaders(request.headers);
     if (canister) {
-      return {
-        canister: {
-          gateway: canister.gateway,
-          principal: canister.principal,
-        },
-      };
+      return canister;
     }
 
-    return await this.lookup(new URL(request.url));
+    return await this.lookup(url);
   }
 
-  async lookup(domain: URL, useCurrentGateway = true): Promise<DomainLookup> {
+  async lookup(domain: URL): Promise<Principal | null> {
     // inglight map is used to deduplicate lookups for the same domain
-    let inflightLookup = this.inflight.get(domain.hostname);
+    let inflightLookup = this.inflight.get(domain.origin);
     if (inflightLookup) {
-      const lookup = await inflightLookup;
-      return useCurrentGateway ? await this.useCurrentGateway(lookup) : lookup;
+      return await inflightLookup;
     }
 
-    inflightLookup = (async (): Promise<DomainLookup> => {
+    inflightLookup = (async (): Promise<Principal | null> => {
       // maybe resolve from information available in the request
       const lookupFromUrl = this.resolveLookupFromUrl(domain);
       if (lookupFromUrl) {
@@ -126,7 +159,7 @@ export class CanisterResolver {
       }
 
       // maybe resolve from previous cached results
-      const cachedLookup = await this.storage.get(domain.hostname);
+      const cachedLookup = await this.storage.get(domain.origin);
       if (cachedLookup) {
         return ResolverMapper.fromDBHostsItem(cachedLookup);
       }
@@ -137,12 +170,12 @@ export class CanisterResolver {
       // we cache lookups to avoid additional round trips to the same domain
       try {
         const dbHostItem: DBHostsItem = ResolverMapper.toDBHostsItem(lookup);
-        await this.storage.put(domain.hostname, dbHostItem, {
+        await this.storage.put(domain.origin, dbHostItem, {
           ttl: new Date(Date.now() + this.ttl),
         });
       } catch (err) {
         // only log the error in case persist transaction fails
-        console.error('Failed to cache host lookup', err);
+        logger.error('Failed to cache host lookup', err);
       }
 
       return lookup;
@@ -150,11 +183,11 @@ export class CanisterResolver {
 
     // caching the promise of inflight requests to enable concurrent
     // requests to the same domain to use the same promise
-    this.inflight.set(domain.hostname, inflightLookup);
+    this.inflight.set(domain.origin, inflightLookup);
     const lookup = await inflightLookup;
-    this.inflight.delete(domain.hostname);
+    this.inflight.delete(domain.origin);
 
-    return useCurrentGateway ? await this.useCurrentGateway(lookup) : lookup;
+    return lookup;
   }
 
   /**
@@ -163,102 +196,82 @@ export class CanisterResolver {
    */
   public isAPICall(
     request: Request,
-    gateway: URL,
-    lookup: DomainLookup
+    gatewayUrl: URL,
+    mainNet = isMainNet
   ): boolean {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith('/api/')) {
-      return false;
-    }
 
-    if (url.hostname.endsWith(gateway.hostname)) {
-      return true;
-    }
-
-    return lookup.canister !== false;
+    return (
+      url.pathname.startsWith('/api/') &&
+      this.isGatewayCall(url, gatewayUrl, mainNet)
+    );
   }
 
   /**
-   * Checks if the given request is a request to the same domain.
+   * Checks if the given request is a call to the `/_/raw/` endpoint.
    * @param request The request to check
+   * @param gatewayUrl The current gateway URL
+   * @param mainNet Whether the current network is mainnet or not
+   * @returns True if the request is a call to the `/_/raw/` endpoint, false otherwise
    */
-  public async isIcDomain(request: Request): Promise<boolean> {
+  public isUnderscoreRawCall(
+    request: Request,
+    gatewayUrl: URL,
+    mainNet = isMainNet
+  ): boolean {
     const url = new URL(request.url);
-    const sameDomain =
-      url.hostname.endsWith(self.location.hostname) &&
-      !url.hostname.endsWith(`raw.${self.location.hostname}`);
-    if (sameDomain) {
+
+    return (
+      url.pathname.startsWith('/_/raw') &&
+      this.isGatewayCall(url, gatewayUrl, mainNet)
+    );
+  }
+
+  private isGatewayCall(
+    url: URL,
+    gatewayUrl: URL,
+    mainNet = isMainNet
+  ): boolean {
+    if (!mainNet && url.hostname.endsWith(gatewayUrl.hostname)) {
       return true;
     }
 
-    const lookup = await this.lookupFromHttpRequest(request);
-    if (lookup.canister) {
-      const gateway = lookup.canister.gateway;
-      return (
-        url.hostname.endsWith(gateway.hostname) &&
-        !url.hostname.endsWith(`raw.${gateway.hostname}`)
-      );
-    }
-
-    return false;
-  }
-
-  /**
-   * Enrich the domain lookup with the current gateway for all canister api calls,
-   * this enables the user to have the freedom to choose the gateway he would
-   * be communicating with instead of having the domain mandating it.
-   * @param lookup Lookup for the given domain
-   */
-  private async useCurrentGateway(lookup: DomainLookup): Promise<DomainLookup> {
-    if (
-      lookup.canister &&
-      lookup.canister.gateway.hostname !== self.location.hostname
-    ) {
-      lookup.canister.gateway = await this.getCurrentGateway();
-    }
-
-    return lookup;
+    return apiGateways.some((apiGateway) => url.hostname.endsWith(apiGateway));
   }
 
   /**
    * Performs a HEAD request to the domain expecting to get back the canister id and gateway,
    * if both are not available handles the domain as a web2 request.
+   * The lookup request is made over HTTPS for security reasons.
    * @param domain The domain to find out if points to a canister or we2.
    * @param retries Number of fetch tries, only retry on network failures
    */
-  private async fetchDomain(domain: URL, retries = 3): Promise<DomainLookup> {
+  private async fetchDomain(
+    domain: URL,
+    retries = 3
+  ): Promise<Principal | null> {
     try {
-      const response = await fetch(domain.href, {
+      const secureDomain = ResolverMapper.toHTTPSUrl(domain);
+      const response = await fetch(secureDomain.href, {
         method: 'HEAD',
         mode: 'no-cors',
       });
       const headers = response.headers;
-      const lookup: DomainLookup = { canister: false };
 
       // we expect a 200 from a request to the http gateway
       const successfulResponse =
         response.status >= 200 && response.status < 300;
 
-      if (
-        successfulResponse &&
-        headers.has(domainLookupHeaders.canisterId) &&
-        headers.has(domainLookupHeaders.gateway)
-      ) {
-        const canisterId = headers.get(domainLookupHeaders.canisterId);
-        const gateway = headers.get(domainLookupHeaders.gateway);
-        lookup.canister = {
-          principal: ResolverMapper.getPrincipalFromText(canisterId),
-          gateway: ResolverMapper.getURLFromHostname(gateway),
-        };
+      if (successfulResponse && headers.has(domainLookupHeaders.canisterId)) {
+        const canisterId = headers.get(domainLookupHeaders.canisterId) ?? '';
+
+        return ResolverMapper.getPrincipalFromText(canisterId);
       }
 
-      return lookup;
+      return null;
     } catch (err) {
       // we don't retry in case the gateway returned wrong headers
-      if (
-        err instanceof MalformedCanisterError ||
-        err instanceof MalformedHostnameError
-      ) {
+      if (err instanceof MalformedCanisterError) {
         throw err;
       }
 

@@ -98,7 +98,7 @@ describe('Storage connection to indexed db', () => {
   it('should connect and create stores from callback', async () => {
     const storeNames: CreateStoreOptions[] = [
       'ic-singularity',
-      (database) => database.createObjectStore<string>('ic-scalability'),
+      async (database) => database.createObjectStore<string>('ic-scalability'),
     ];
     storage = await Storage.connect({
       stores: {
@@ -167,7 +167,7 @@ describe('Storage persist to indexed db', () => {
     expect(foundValue).toEqual(value);
   });
 
-  it('should remove value if it reachs ttl', async () => {
+  it('should remove value if it reaches ttl', async () => {
     const key: IDBKey = 'identity.ic0.app';
     const value = {
       gateway: 'ic0.app',
@@ -231,5 +231,20 @@ describe('Storage persist to indexed db', () => {
     expect(hasAllEntries.length).toEqual(2);
     expect(hasOneEntry.length).toEqual(1);
     expect(hasNoEntry.length).toEqual(0);
+  });
+
+  it('should delete based on key', async () => {
+    const key = 'identity.ic0.app';
+    await storage.put(key, {
+      gateway: 'ic0.app',
+      canister: 'rdmx6-jaaaa-aaaaa-aaadq-cai',
+    });
+
+    const entry = await storage.get(key);
+    await storage.delete(key);
+    const undefinedEntry = await storage.get(key);
+
+    expect(entry).not.toBeUndefined();
+    expect(undefinedEntry).toBeUndefined();
   });
 });

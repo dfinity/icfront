@@ -1,4 +1,10 @@
-import { openDB, deleteDB, IDBPDatabase, IDBPObjectStore } from 'idb';
+import {
+  openDB,
+  deleteDB,
+  IDBPDatabase,
+  IDBPObjectStore,
+  IDBPTransaction,
+} from 'idb';
 
 const DB_NAME = 'sw';
 const DB_VERSION = 1.0;
@@ -7,7 +13,7 @@ const TTL_INDEX_NAME = 'ttl';
 const TTL_INDEX_KEY_PATH = 'expireAt';
 
 type KeysOf<T> = keyof T & string;
-type DBValue = { expireAt?: number; body: unknown };
+type DBValue<T = unknown> = { expireAt?: number; body: T };
 type DBValueSchema = {
   value: DBValue;
 };
@@ -22,8 +28,12 @@ type PickDBSchemaValue<
 
 type IDBKey = IDBValidKey | IDBKeyRange;
 type CreateStoreFn = (
-  database: IDBPDatabase<unknown>
-) => IDBPObjectStore<unknown, ArrayLike<string>, string, 'versionchange'>;
+  database: IDBPDatabase<unknown>,
+  oldVersion: number,
+  transaction: IDBPTransaction<unknown, string[], 'versionchange'>
+) => Promise<
+  IDBPObjectStore<unknown, ArrayLike<string>, string, 'versionchange'>
+>;
 type CreateStoreOptions = CreateStoreFn | string;
 type InitStores = CreateStoreOptions[];
 
@@ -85,10 +95,10 @@ class Storage<StorageDB extends DBSchema | unknown = unknown> {
     }
 
     const idb = await openDB(name, version, {
-      upgrade(database) {
-        stores?.init?.forEach((createStore) => {
+      async upgrade(database, oldVersion, _newVersion, transaction) {
+        for (const createStore of stores.init ?? []) {
           if (typeof createStore !== 'string') {
-            const store = createStore(database);
+            const store = await createStore(database, oldVersion, transaction);
             store.createIndex(TTL_INDEX_NAME, TTL_INDEX_KEY_PATH);
             return;
           }
@@ -101,7 +111,7 @@ class Storage<StorageDB extends DBSchema | unknown = unknown> {
 
           const store = database.createObjectStore(createStore);
           store.createIndex(TTL_INDEX_NAME, TTL_INDEX_KEY_PATH);
-        });
+        }
 
         database.onversionchange = function () {
           database.close();
@@ -117,7 +127,7 @@ class Storage<StorageDB extends DBSchema | unknown = unknown> {
     }
 
     const defaultStore =
-      stores?.default ?? (idb.objectStoreNames[0] as typeof stores.default);
+      stores?.default ?? (idb.objectStoreNames[0] as StoreName<StorageDB>);
     const storage = new Storage<StorageDB>(idb, defaultStore);
 
     await storage.removeOutdatedRecords();
@@ -158,12 +168,26 @@ class Storage<StorageDB extends DBSchema | unknown = unknown> {
       StoreName<StorageDB>
     > = await this.idb.get(store, key);
 
-    if (value?.expireAt && Date.now() >= value?.expireAt) {
+    if (value?.expireAt && Date.now() >= value.expireAt) {
       await this.idb.delete(store, key);
-      return undefined;
+      return;
     }
 
     return value?.body;
+  }
+
+  /**
+   * Deletes the value for a given key from indexed db store if available.
+   *
+   * @param key Key to fetch from the indexed db
+   * @param storeName Optional store name, defaults to initial store
+   */
+  async delete(
+    key: IDBKey,
+    opts?: { storeName?: StoreName<StorageDB> }
+  ): Promise<void> {
+    const store = opts?.storeName ?? this.defaultStore;
+    await this.idb.delete(store, key);
   }
 
   /**
@@ -184,7 +208,7 @@ class Storage<StorageDB extends DBSchema | unknown = unknown> {
   }
 
   /**
-   * Sets the value for a given key to indexed db store, it wrapps the value with the given ttl to
+   * Sets the value for a given key to indexed db store, it wraps the value with the given ttl to
    * expire the record. If TTL is not present, the value won't expire.
    *
    * @param key Key to set into the indexed db
@@ -249,6 +273,7 @@ export {
   DB_DEFAULT_STORE,
   Storage,
   StorageConnectOptions,
+  DBValue,
   CreateStoreFn,
   StoresOptions,
   IDBKey,

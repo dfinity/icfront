@@ -1,11 +1,8 @@
+import { Principal } from '@dfinity/principal';
 import { mockLocation } from '../../mocks/location';
-import {
-  CurrentGatewayResolveError,
-  MalformedCanisterError,
-  MalformedHostnameError,
-} from './errors';
-import { CanisterLookup, DomainLookup, domainLookupHeaders } from './typings';
+import { MalformedCanisterError } from './errors';
 import * as resolverImport from './index';
+import { domainLookupHeaders } from './typings';
 
 let CanisterResolver: typeof resolverImport.CanisterResolver;
 
@@ -40,55 +37,27 @@ describe('Canister resolver lookups', () => {
     expect(resolver).toBeInstanceOf(CanisterResolver);
   });
 
-  it('should resolve current gateway', async () => {
+  it('should resolve current gateway on testnet', async () => {
     global.self.location = mockLocation(
       'https://rdmx6-jaaaa-aaaaa-aaadq-cai.ic1.app'
     );
 
     const resolver = await CanisterResolver.setup();
-    const currentGateway = await resolver.getCurrentGateway();
+    const currentGateway = await resolver.getCurrentGateway(false);
 
     expect(currentGateway).not.toEqual(null);
     expect(currentGateway).toEqual(new URL('https://ic1.app'));
   });
 
-  it('should fail to resolve current gateway of unknown domain', async () => {
-    global.self.location = mockLocation('https://www.unknowncustomdomain.com');
-
-    try {
-      const resolver = await CanisterResolver.setup();
-      await resolver.getCurrentGateway();
-    } catch (err) {
-      expect(err).toBeInstanceOf(CurrentGatewayResolveError);
-    }
-  });
-
-  it('should resolve current gateway of known domain', async () => {
-    const protocol = 'https:';
-    const canisterId = 'rdmx6-jaaaa-aaaaa-aaadq-cai';
-    const gatewayHostname = 'customgateway.io';
-    const fetchSpy = jest.spyOn(global, 'fetch');
-
+  it('should not resolve current gateway on mainnet', async () => {
     global.self.location = mockLocation(
-      `${protocol}//www.knowncustomdomain.com`
-    );
-
-    const mockedHeaders = new Headers();
-    mockedHeaders.set(domainLookupHeaders.canisterId, canisterId);
-    mockedHeaders.set(domainLookupHeaders.gateway, gatewayHostname);
-    fetchSpy.mockResolvedValueOnce(
-      new Response(null, {
-        headers: mockedHeaders,
-        status: 200,
-        statusText: '200 OK',
-      })
+      'https://rdmx6-jaaaa-aaaaa-aaadq-cai.ic1.app'
     );
 
     const resolver = await CanisterResolver.setup();
-    const currentGateway = await resolver.getCurrentGateway();
+    const currentGateway = await resolver.getCurrentGateway(true);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(currentGateway).toEqual(new URL(`${protocol}//${gatewayHostname}`));
+    expect(currentGateway).toEqual(new URL('https://icp-api.io'));
   });
 
   it('should retry lookup on network failure', async () => {
@@ -121,7 +90,7 @@ describe('Canister resolver lookups', () => {
 
     // N calls for the same domain should only do one fetch
     const numberOfCalls = 10;
-    let lookups: DomainLookup[] = [];
+    const lookups: (Principal | null)[] = [];
     for (let i = 0; i < numberOfCalls; ++i) {
       lookups.push(
         await resolver.lookup(new URL('https://www.customdappdomain.io'))
@@ -179,11 +148,9 @@ describe('Canister resolver lookups', () => {
     const resolver = await CanisterResolver.setup();
     const hostname = 'www.customdomain.com';
     const canisterId = 'rdmx6-jaaaa-aaaaa-aaadq-cai';
-    const gatewayHostname = 'customgateway.io';
 
     const mockedHeaders = new Headers();
     mockedHeaders.set(domainLookupHeaders.canisterId, canisterId);
-    mockedHeaders.set(domainLookupHeaders.gateway, gatewayHostname);
     fetchSpy.mockResolvedValue(
       new Response(null, {
         headers: mockedHeaders,
@@ -197,7 +164,7 @@ describe('Canister resolver lookups', () => {
     );
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(web2resource.canister).toEqual(false);
+    expect(web2resource).toEqual(null);
   });
 
   it('should fail lookup if canister header is malformated', async () => {
@@ -209,7 +176,6 @@ describe('Canister resolver lookups', () => {
       domainLookupHeaders.canisterId,
       'invalid-canister-format'
     );
-    mockedHeaders.set(domainLookupHeaders.gateway, 'ic0.app');
     fetchSpy.mockResolvedValue(
       new Response(null, {
         headers: mockedHeaders,
@@ -224,80 +190,107 @@ describe('Canister resolver lookups', () => {
         new URL(`${self.location.protocol}//anydomain.com`)
       );
     } catch (err) {
-      error = err;
+      error = err as Error;
     }
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(error).toBeInstanceOf(MalformedCanisterError);
   });
 
-  it('should fail lookup if gateway header is malformated', async () => {
-    const fetchSpy = jest.spyOn(global, 'fetch');
+  it('should accept https protocols on lookup', async () => {
     const resolver = await CanisterResolver.setup();
+    const canister = Principal.fromText('rdmx6-jaaaa-aaaaa-aaadq-cai');
+    const requestUrl = `https://${canister.toText()}.icp0.io`;
+    const request = new Request(requestUrl, {
+      headers: {
+        host: requestUrl,
+      },
+    });
 
-    const mockedHeaders = new Headers();
-    mockedHeaders.set(
-      domainLookupHeaders.canisterId,
-      'rdmx6-jaaaa-aaaaa-aaadq-cai'
-    );
-    mockedHeaders.set(domainLookupHeaders.gateway, '');
-    fetchSpy.mockResolvedValue(
-      new Response(null, {
-        headers: mockedHeaders,
-        status: 200,
-        statusText: '200 OK',
-      })
-    );
+    const lookup = await resolver.lookupFromHttpRequest(request);
 
-    let error: Error | null = null;
-    try {
-      await resolver.lookup(new URL(`${self.location.protocol}//domain.com`));
-    } catch (err) {
-      error = err;
-    }
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(error).toBeInstanceOf(MalformedHostnameError);
+    expect(lookup?.toText()).toEqual(canister.toText());
   });
 
-  it('should add gateway protocol as the current location protocol', async () => {
-    const protocol = 'http:';
-    global.self.location = mockLocation(
-      `${protocol}//rdmx6-jaaaa-aaaaa-aaadq-cai.ic0.app`
-    );
-
-    const canisterId = 'qoctq-giaaa-aaaaa-aaaea-cai';
-    const gatewayHostname = 'anothergateway.io';
-    const fetchSpy = jest.spyOn(global, 'fetch');
+  it('should not resolve non https protocols on lookup', async () => {
     const resolver = await CanisterResolver.setup();
+    const canister = Principal.fromText('rdmx6-jaaaa-aaaaa-aaadq-cai');
+    const requestUrl = `custom-protocol://${canister.toText()}.icp0.io`;
+    const request = new Request(requestUrl, {
+      headers: {
+        host: requestUrl,
+      },
+    });
 
-    const mockedHeaders = new Headers();
-    mockedHeaders.set(domainLookupHeaders.canisterId, canisterId);
-    mockedHeaders.set(domainLookupHeaders.gateway, gatewayHostname);
-    fetchSpy.mockResolvedValue(
-      new Response(null, {
-        headers: mockedHeaders,
-        status: 200,
-        statusText: '200 OK',
-      })
-    );
+    const lookup = await resolver.lookupFromHttpRequest(request);
 
-    const urlContainsCanisterLookup = await resolver.lookup(
-      new URL('https://g3wsl-eqaaa-aaaan-aaaaa-cai.customgateway.com')
-    );
-    const customDomainLookup = await resolver.lookup(
-      new URL('https://newdomain.com')
-    );
+    expect(lookup).toBeNull();
+  });
 
-    expect(urlContainsCanisterLookup).not.toEqual(null);
-    expect(customDomainLookup).not.toEqual(null);
-    expect(urlContainsCanisterLookup.canister).not.toBeFalsy();
-    expect(customDomainLookup.canister).not.toBeFalsy();
-    expect(
-      (urlContainsCanisterLookup.canister as CanisterLookup).gateway.protocol
-    ).toEqual(protocol);
-    expect(
-      (customDomainLookup.canister as CanisterLookup).gateway.protocol
-    ).toEqual(protocol);
+  describe('isAPICall', () => {
+    const gatewayURL = new URL('https://icp-api.io');
+
+    it.each([
+      'https://boundary.dfinity.network/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+      'https://boundary.ic0.app/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+      'https://ic0.app/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+      'https://icp0.io/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+      'https://icp-api.io/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+    ])('should return true for a request to %s', async (url) => {
+      const request = new Request(url);
+      const resolver = await CanisterResolver.setup();
+
+      expect(resolver.isAPICall(request, gatewayURL, true)).toEqual(true);
+    });
+
+    it.each([
+      'https://boundary.dfinity.network/index.js',
+      'https://boundary.ic0.app/index.js',
+      'https://ic0.app/index.js',
+      'https://icp0.io/index.js',
+      'https://icp-api.io/index.js',
+      'https://evilcorp.com/index.js',
+      'https://evilcorp.com/api/v2/canister/xrfpr-ryaaa-aaaaj-aiq7q-cai/query',
+    ])('should return false for a request to %s', async (url) => {
+      const request = new Request(url);
+      const resolver = await CanisterResolver.setup();
+
+      expect(resolver.isAPICall(request, gatewayURL, true)).toEqual(false);
+    });
+  });
+
+  describe('isGatewayCall', () => {
+    const gatewayURL = new URL('https://icp-api.io');
+
+    it.each([
+      'https://boundary.dfinity.network/_/raw/index.js',
+      'https://boundary.ic0.app/_/raw/index.js',
+      'https://ic0.app/_/raw/index.js',
+      'https://icp0.io/_/raw/index.js',
+      'https://icp-api.io/_/raw/index.js',
+    ])('should return true for a request to %s', async (url) => {
+      const request = new Request(url);
+      const resolver = await CanisterResolver.setup();
+
+      expect(resolver.isUnderscoreRawCall(request, gatewayURL, true)).toEqual(
+        true
+      );
+    });
+
+    it.each([
+      'https://boundary.dfinity.network/index.js',
+      'https://boundary.ic0.app/index.js',
+      'https://ic0.app/index.js',
+      'https://icp0.io/index.js',
+      'https://icp-api.io/index.js',
+      'https://evilcorp.com/_/raw/index.js',
+    ])('should return false for a request to %s', async (url) => {
+      const request = new Request(url);
+      const resolver = await CanisterResolver.setup();
+
+      expect(resolver.isUnderscoreRawCall(request, gatewayURL, true)).toEqual(
+        false
+      );
+    });
   });
 });

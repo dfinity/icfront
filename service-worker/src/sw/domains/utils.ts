@@ -1,5 +1,13 @@
 import { Principal } from '@dfinity/principal';
-import { CanisterLookup } from './typings';
+import { isMainNet } from '../requests/utils';
+
+export const apiGateways = [
+  'boundary.dfinity.network',
+  'boundary.ic0.app',
+  'ic0.app',
+  'icp0.io',
+  'icp-api.io',
+];
 
 /**
  * Try to resolve the Canister ID to contact from headers.
@@ -8,7 +16,7 @@ import { CanisterLookup } from './typings';
  */
 export function maybeResolveCanisterFromHeaders(
   headers: Headers
-): CanisterLookup | null {
+): Principal | null {
   const maybeHostHeader = headers.get('host');
   if (maybeHostHeader) {
     // Remove the port.
@@ -28,47 +36,22 @@ export function maybeResolveCanisterFromHeaders(
  * @param url The URL (normally from the request).
  * @returns A Canister ID or null if none were found.
  */
-export function resolveCanisterFromUrl(url: URL): CanisterLookup | null {
-  try {
-    let lookup = maybeResolveCanisterFromHostName(url.hostname);
-    if (!lookup) {
-      const principal = maybeResolveCanisterIdFromSearchParam(url.searchParams);
-      if (principal) {
-        lookup = {
-          principal,
-          gateway: url,
-        };
-      }
-    }
-
-    return lookup;
-  } catch (_) {
-    return null;
-  }
+export function resolveCanisterFromUrl(url: URL): Principal | null {
+  return maybeResolveCanisterFromHostName(url.hostname);
 }
 
-/**
- * Try to resolve the Canister ID to contact in the search params.
- * @param searchParams The URL Search params.
- * @returns A Canister ID or null if none were found.
- */
-export function maybeResolveCanisterIdFromSearchParam(
-  searchParams: URLSearchParams
-): Principal | null {
-  const maybeCanisterId = searchParams.get('canisterId');
-  if (maybeCanisterId) {
-    try {
-      return Principal.fromText(maybeCanisterId);
-    } catch (e) {
-      // Do nothing.
-    }
-  }
-
-  return null;
-}
-
-export function isRawDomain(hostname: string): boolean {
-  return !!hostname.match(new RegExp(/\.raw\.ic[0-9]+\./));
+export function isRawDomain(hostname: string, mainNet = isMainNet): boolean {
+  // For security reasons the match is only made for ic[0-9].app, ic[0-9].dev and icp[0-9].io domains. This makes
+  // the match less permissive and prevents unwanted matches for domains that could include raw
+  // but still serve as a normal dapp domain that should go through response verification.
+  const isIcAppRaw = !!hostname.match(new RegExp(/\.raw\.ic[0-9]+\.app/));
+  const isIcDevRaw = !!hostname.match(new RegExp(/\.raw\.testic[0-9]+\.app/));
+  const isIcpIoRaw = !!hostname.match(new RegExp(/\.raw\.icp[0-9]+\.io/));
+  const isTestnetRaw =
+    !mainNet &&
+    (!!hostname.match(new RegExp(/\.raw\.[\w-]+\.testnet\.[\w-]+\.network/)) ||
+      !!hostname.match(new RegExp(/\.raw\.ic[0-9]+\.dev/)));
+  return isIcAppRaw || isIcDevRaw || isIcpIoRaw || isTestnetRaw;
 }
 
 /**
@@ -78,9 +61,8 @@ export function isRawDomain(hostname: string): boolean {
  */
 export function maybeResolveCanisterFromHostName(
   hostname: string
-): CanisterLookup | null {
-  const subdomains = hostname.split('.').reverse();
-  const topdomains: string[] = [];
+): Principal | null {
+  const subdomains = hostname.split('.');
   // raw ic domain in handled as a normal web2 request
   if (isRawDomain(hostname)) {
     return null;
@@ -88,15 +70,10 @@ export function maybeResolveCanisterFromHostName(
 
   for (const domain of subdomains) {
     try {
-      const principal = Principal.fromText(domain);
-      return {
-        principal,
-        gateway: new URL(
-          self.location.protocol + '//' + topdomains.reverse().join('.')
-        ),
-      };
+      return Principal.fromText(domain);
     } catch (_) {
-      topdomains.push(domain);
+      // subdomain did not match expected Principal format
+      // continue checking each subdomain
     }
   }
 

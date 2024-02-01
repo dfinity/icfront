@@ -29,7 +29,7 @@ the agent and, for security reasons, should not be fetched by the agent.
 Generate the binding:
 
 ```shell
-didc bind ./src/http-interface/canister_http_interface.did --target js > ./src/http-interface/canister_http_interface.js
+didc bind ./src/http-interface/canister_http_interface.did --target js > ./src/http-interface/canister_http_interface.ts
 ```
 
 Then move the `StreamingCallbackHttpResponse` variable outside of the `idlFactory` function, rename to `streamingCallbackHttpResponseType` and then export it.
@@ -38,13 +38,21 @@ Then move the `StreamingCallbackHttpResponse` variable outside of the `idlFactor
 export const streamingCallbackHttpResponseType = // ...
 ```
 
-and then add the `import { IDL } from '@dfinity/candid';` import, move the `Token` variable outside of the `idlFactory` function, and set its value to be `IDL.Unknown`.
+then add the `import { IDL } from '@dfinity/candid';` import, move the `Token` variable outside of the `idlFactory` function, and set its value to be `IDL.Unknown`.
 
 ```typescript
 import { IDL } from '@dfinity/candid';
 
 const Token = IDL.Unknown;
 ```
+
+then add the type `IDL.InterfaceFactory` to the idlFactory export.
+
+```typescript
+export const idlFactory: IDL.InterfaceFactory = // ...
+```
+
+and finally remove the unused init method `export const init`.
 
 ### TypeScript binding
 
@@ -125,52 +133,19 @@ export type Token = { type: <T>() => IDL.Type<T> };
       127.0.0.1 dscvr.ic.local
       127.0.0.1 nns.ic.local
       ```
-1. Set the `hostnameCanisterIdMap` value in the `domains/static.ts` file (make sure to revert this before commiting):
+1. Set the `hostnameCanisterIdMap` value in the `src/sw/domains/static.ts` file (make sure to revert this before committing):
       ```shell
-      Object.entries({
-            'identity.ic0.local': {
-                  canister: {
-                        principal: Principal.from('rdmx6-jaaaa-aaaaa-aaadq-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'nns.ic0.local': {
-                  canister: {
-                        principal: Principal.from('qoctq-giaaa-aaaaa-aaaea-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'dscvr.ic0.local': {
-                  canister: {
-                        principal: Principal.from('h5aet-waaaa-aaaab-qaamq-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'distrikt.ic0.local': {
-                  canister: {
-                        principal: Principal.from('az5sd-cqaaa-aaaae-aaarq-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'distrikt-staging.ic0.local': {
-                  canister: {
-                        principal: Principal.from('am2do-dyaaa-aaaae-aaasa-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'nuance.ic0.local': {
-                  canister: {
-                        principal: Principal.from('exwqn-uaaaa-aaaaf-qaeaa-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-            'oc.ic0.local': {
-                  canister: {
-                        principal: Principal.from('6hsbt-vqaaa-aaaaf-aaafq-cai'),
-                        gateway: DEFAULT_GATEWAY,
-                  },
-            },
-      });
+      export const hostnameCanisterIdMap: Map<string, Principal> = new Map(
+            Object.entries({
+                  'identity.ic0.local': Principal.from('rdmx6-jaaaa-aaaaa-aaadq-cai'),
+                  'nns.ic0.local': Principal.from('qoctq-giaaa-aaaaa-aaaea-cai'),
+                  'dscvr.ic0.local': Principal.from('h5aet-waaaa-aaaab-qaamq-cai'),
+                  'distrikt.ic0.local': Principal.from('az5sd-cqaaa-aaaae-aaarq-cai'),
+                  'distrikt-staging.ic0.local': Principal.from('am2do-dyaaa-aaaae-aaasa-cai'),
+                  'nuance.ic0.local': Principal.from('exwqn-uaaaa-aaaaf-qaeaa-cai'),
+                  'oc.ic0.local': Principal.from('6hsbt-vqaaa-aaaaf-aaafq-cai'),
+            })
+      );
       ```
 1. Build and watch the service worker:
       ```shell
@@ -184,6 +159,26 @@ export type Token = { type: <T>() => IDL.Type<T> };
       ```
       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --user-data-dir=/tmp/no-ssl --ignore-certificate-errors
       ```
+
+## e2e Tests
+
+Start e2e testing env:
+
+```shell
+./e2e/start-e2e-env.sh
+```
+
+Run e2e tests:
+
+```shell
+./e2e/run-e2e-tests.sh
+```
+
+Stop e2e testing env:
+
+```shell
+./e2e/stop-e2e-env.sh
+```
 
 ## Release
 

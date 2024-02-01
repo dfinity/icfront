@@ -1,0 +1,11 @@
+dist-dev/
+dist-prod/
+node_modules/
+coverage/
+certs/
+junit.xml
+.DS_Store
+.env
+tmp/
+.dfx
+*.log
